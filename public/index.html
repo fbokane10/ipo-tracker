@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>US IPO Pipeline Tracker</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+    <!-- Header -->
+    <header>
+        <div class="container">
+            <h1>📈 US IPO Pipeline Tracker</h1>
+            <div class="header-actions">
+                <button id="refreshBtn" class="btn btn-primary">🔄 Refresh Data</button>
+                <button id="fetchSecBtn" class="btn btn-secondary">📥 Fetch SEC Data</button>
+                <button id="exportBtn" class="btn btn-success">📊 Export CSV</button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Real-time Status Bar -->
+    <div id="statusBar" class="status-bar">
+        <span id="connectionStatus" class="status-indicator">⚫ Connecting...</span>
+        <span id="lastUpdate">Last update: Never</span>
+        <span id="totalFilings">Total filings: 0</span>
+    </div>
+
+    <!-- Main Content -->
+    <main class="container">
+        <!-- Statistics Cards -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3>Total IPO Filings</h3>
+                <div class="stat-number" id="totalCount">0</div>
+                <div class="stat-label">All Time</div>
+            </div>
+            <div class="stat-card">
+                <h3>This Month</h3>
+                <div class="stat-number" id="monthCount">0</div>
+                <div class="stat-label">New Filings</div>
+            </div>
+            <div class="stat-card">
+                <h3>In Progress</h3>
+                <div class="stat-number" id="activeCount">0</div>
+                <div class="stat-label">Active IPOs</div>
+            </div>
+            <div class="stat-card">
+                <h3>Completed</h3>
+                <div class="stat-number" id="completedCount">0</div>
+                <div class="stat-label">Now Trading</div>
+            </div>
+        </div>
+
+        <!-- Charts Section -->
+        <div class="charts-section">
+            <div class="chart-container">
+                <h3>Monthly Filing Trends</h3>
+                <canvas id="monthlyChart"></canvas>
+            </div>
+            <div class="chart-container">
+                <h3>Industry Breakdown</h3>
+                <canvas id="industryChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Filters Section -->
+        <div class="filters-section">
+            <h3>Filter Filings</h3>
+            <div class="filters-grid">
+                <div class="filter-group">
+                    <label for="dateFilter">Date Range:</label>
+                    <select id="dateFilter">
+                        <option value="all">All Time</option>
+                        <option value="today">Today</option>
+                        <option value="week">This Week</option>
+                        <option value="month">This Month</option>
+                        <option value="quarter">This Quarter</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="statusFilter">Status:</label>
+                    <select id="statusFilter">
+                        <option value="all">All Statuses</option>
+                        <option value="Filed">Filed</option>
+                        <option value="Marketing">Marketing</option>
+                        <option value="Priced">Priced</option>
+                        <option value="Trading">Trading</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="typeFilter">Filing Type:</label>
+                    <select id="typeFilter">
+                        <option value="all">All Types</option>
+                        <option value="S-1">S-1 (US Companies)</option>
+                        <option value="F-1">F-1 (Foreign)</option>
+                        <option value="424B4">424B4 (Pricing)</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="searchFilter">Search:</label>
+                    <input type="text" id="searchFilter" placeholder="Company name...">
+                </div>
+            </div>
+        </div>
+
+        <!-- Data Table -->
+        <div class="table-section">
+            <h3>IPO Filings <span id="filteredCount">(0 filings)</span></h3>
+            <div class="table-wrapper">
+                <table id="filingsTable">
+                    <thead>
+                        <tr>
+                            <th class="sortable" data-sort="filing_date">Date ↕</th>
+                            <th class="sortable" data-sort="company_name">Company ↕</th>
+                            <th>Ticker</th>
+                            <th>Industry</th>
+                            <th>Type</th>
+                            <th class="sortable" data-sort="status">Status ↕</th>
+                            <th>Price Range</th>
+                            <th class="sortable" data-sort="amount_to_raise">Amount ↕</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="filingsTableBody">
+                        <tr>
+                            <td colspan="9" class="loading">Loading data...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer>
+        <div class="container">
+            <p>IPO Tracker - Real-time SEC EDGAR Data | Auto-updates every hour</p>
+        </div>
+    </footer>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="toast"></div>
+
+    <!-- Load JavaScript -->
+    <script src="dashboard.js"></script>
+</body>
+</html>
