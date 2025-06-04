@@ -1,0 +1,9 @@
+[database]
+path = "ipo.sqlite"
+
+[sec]
+user_agent = "MyIPOTracker/1.0 (contact@example.com)"
+sleep = 0.12
+
+[alpha_vantage]
+key = "YOUR_ALPHA_VANTAGE_KEY"

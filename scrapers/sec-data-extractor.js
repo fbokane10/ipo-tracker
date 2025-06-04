@@ -35,7 +35,7 @@ async function extractFinancialData(cik, accessionNumber) {
         };
         
         // Try to extract from structured data first
-        const structuredData = await extractFromStructuredData(cik, accessionNumber);
+        const structuredData = await extractFromStructuredData(cik);
         if (structuredData) {
             Object.assign(financialData, structuredData);
         }
@@ -115,58 +115,44 @@ async function fetchFilingSummary(baseUrl) {
 }
 
 // Extract data from structured filings
-async function extractFromStructuredData(cik, accessionNumber) {
+async function extractFromStructuredData(cik) {
     try {
-        // For S-1 and F-1 filings, data is often in the primary document
-        // This is a simplified extraction - real implementation would parse XBRL or HTML tables
-        
-        const data = {
-            shares_outstanding: null,
-            shares_offered: null,
-            price_range_low: null,
-            price_range_high: null,
-            revenue_last_year: null,
-            profit_last_year: null,
-            lead_underwriters: null,
-            exchange: null
+        const cikPadded = String(cik).padStart(10, '0');
+        const url = `https://data.sec.gov/api/xbrl/companyfacts/CIK${cikPadded}.json`;
+        const response = await axios.get(url, {
+            headers: {
+                'User-Agent': process.env.SEC_USER_AGENT || 'IPO-Tracker contact@example.com',
+                'Accept': 'application/json'
+            },
+            timeout: 10000
+        });
+
+        const facts = response.data.facts ? response.data.facts['us-gaap'] || {} : {};
+
+        return {
+            shares_outstanding: latestFact(facts, ['WeightedAverageSharesOutstandingBasic'], 'shares'),
+            revenue_last_year: latestFact(facts, ['Revenues'], 'USD'),
+            profit_last_year: latestFact(facts, ['NetIncomeLoss'], 'USD'),
+            assets_last_year: latestFact(facts, ['Assets'], 'USD')
         };
-        
-        // Simulate extraction with common patterns
-        // In a real implementation, you would:
-        // 1. Fetch the actual filing document
-        // 2. Parse HTML/XBRL for specific data points
-        // 3. Use regex or DOM parsing to extract values
-        
-        // For now, we'll return sample data for demonstration
-        // Real extraction would involve parsing the actual filing
-        
-        console.log(`   📄 Attempting to extract structured data...`);
-        
-        // Random sample data for demonstration
-        const sampleData = {
-            shares_outstanding: Math.floor(Math.random() * 100000000) + 10000000,
-            shares_offered: Math.floor(Math.random() * 20000000) + 5000000,
-            price_range_low: Math.floor(Math.random() * 20) + 10,
-            price_range_high: Math.floor(Math.random() * 25) + 15,
-            revenue_last_year: Math.floor(Math.random() * 1000000000) + 10000000,
-            profit_last_year: Math.floor(Math.random() * 100000000) - 50000000,
-            lead_underwriters: 'Goldman Sachs, Morgan Stanley',
-            exchange: Math.random() > 0.5 ? 'NASDAQ' : 'NYSE'
-        };
-        
-        // Ensure high is higher than low
-        if (sampleData.price_range_high < sampleData.price_range_low) {
-            const temp = sampleData.price_range_high;
-            sampleData.price_range_high = sampleData.price_range_low;
-            sampleData.price_range_low = temp;
-        }
-        
-        return sampleData;
-        
+
     } catch (error) {
         console.error(`   ⚠️ Error in structured data extraction:`, error.message);
         return null;
     }
+}
+
+function latestFact(facts, fields, unit) {
+    for (const f of fields) {
+        if (facts[f] && facts[f]['units'] && facts[f]['units'][unit]) {
+            const arr = facts[f]['units'][unit];
+            if (arr && arr.length) {
+                arr.sort((a, b) => a.end.localeCompare(b.end));
+                return arr[arr.length - 1].val;
+            }
+        }
+    }
+    return null;
 }
 
 // Parse accession number from SEC URL
