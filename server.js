@@ -8,10 +8,10 @@ const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
-const path = require('path');
 const { Pool } = require('pg');
 const cron = require('node-cron');
 const axios = require('axios');
+const { enrichFilingWithCompanyInfo } = require('./scrapers/sec-company-info');
 
 const app = express();
 console.log('🚀 Starting IPO Tracker server...');
@@ -343,14 +343,33 @@ io.on('connection', (socket) => {
     });
 });
 
-// Start server
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-    console.log('\n========================================');
-    console.log('✅ IPO Tracker Server is running!');
-    console.log('========================================');
-    console.log(`📍 Local URL: http://localhost:${PORT}`);
-    console.log('========================================\n');
-});
+// Hourly job to fetch and enrich data (disabled during tests)
+if (process.env.NODE_ENV !== 'test') {
+    cron.schedule('0 * * * *', async () => {
+        console.log('⏰ Running scheduled SEC update');
+        const { fetchSECData } = require('./scrapers/sec-edgar');
+        const newFilings = await fetchSECData(pool, io);
+        console.log(`⏰ Fetched ${newFilings} new filings`);
+        const filings = await pool.query(
+            `SELECT id, cik, company_name FROM ipo_filings WHERE (revenue_latest IS NULL OR employees_count IS NULL) LIMIT 20`
+        );
+        for (const filing of filings.rows) {
+            await enrichFilingWithCompanyInfo(filing, pool);
+            await new Promise(r => setTimeout(r, 120));
+        }
+    });
+}
+
+// Start server when run directly
+if (require.main === module) {
+    const PORT = process.env.PORT || 3000;
+    server.listen(PORT, () => {
+        console.log('\n========================================');
+        console.log('✅ IPO Tracker Server is running!');
+        console.log('========================================');
+        console.log(`📍 Local URL: http://localhost:${PORT}`);
+        console.log('========================================\n');
+    });
+}
 
 module.exports = { app, pool, io };
