@@ -1,5 +1,5 @@
 // ===================================
-// IPO TRACKER DASHBOARD JAVASCRIPT
+// IPO TRACKER DASHBOARD - COMPLETE WORKING VERSION
 // ===================================
 
 // Global variables
@@ -13,21 +13,14 @@ let industryChart;
 document.addEventListener('DOMContentLoaded', function() {
     console.log('🚀 Initializing IPO Tracker Dashboard...');
     
-    // Initialize Socket.io connection
     initializeSocket();
-    
-    // Load initial data
     loadFilings();
     loadStatistics();
-    
-    // Set up event listeners
     setupEventListeners();
-    
-    // Update time
     updateLastUpdateTime();
 });
 
-// Initialize Socket.io for real-time updates
+// Initialize Socket.io
 function initializeSocket() {
     socket = io();
     
@@ -41,31 +34,17 @@ function initializeSocket() {
         updateConnectionStatus(false);
     });
     
-    // Listen for new filings
     socket.on('new-filing', function(filing) {
         console.log('📄 New filing received:', filing);
         showToast(`New IPO filing: ${filing.company_name}`, 'info');
-        
-        // Add to our data and refresh
-        allFilings.unshift(filing);
-        applyFilters();
-        updateStatistics();
-    });
-    
-    // Listen for status updates
-    socket.on('status-update', function(update) {
-        console.log('📊 Status update:', update);
-        
-        // Update the filing in our data
-        const filing = allFilings.find(f => f.id === update.id);
-        if (filing) {
-            filing.status = update.status;
-            applyFilters();
-        }
+        setTimeout(() => {
+            loadFilings();
+            loadStatistics();
+        }, 1000);
     });
 }
 
-// Update connection status indicator
+// Update connection status
 function updateConnectionStatus(connected) {
     const indicator = document.getElementById('connectionStatus');
     if (connected) {
@@ -88,14 +67,16 @@ async function loadFilings() {
             applyFilters();
             updateStatistics();
             console.log(`✅ Loaded ${allFilings.length} filings`);
+        } else {
+            throw new Error(data.error);
         }
     } catch (error) {
         console.error('❌ Error loading filings:', error);
-        showToast('Error loading filings', 'error');
+        showToast('Error loading filings: ' + error.message, 'error');
     }
 }
 
-// Load statistics from API
+// Load statistics
 async function loadStatistics() {
     try {
         const response = await fetch('/api/stats');
@@ -109,7 +90,7 @@ async function loadStatistics() {
     }
 }
 
-// Set up all event listeners
+// Set up event listeners
 function setupEventListeners() {
     // Refresh button
     document.getElementById('refreshBtn').addEventListener('click', function() {
@@ -132,19 +113,50 @@ function setupEventListeners() {
             const data = await response.json();
             
             if (data.success) {
-                showToast(`Fetched ${data.count} new filings from SEC`, 'success');
-                // Reload data after fetch
+                showToast(data.message, 'success');
                 setTimeout(() => {
                     loadFilings();
                     loadStatistics();
-                }, 1000);
+                }, 2000);
+            } else {
+                throw new Error(data.error);
             }
         } catch (error) {
-            console.error('❌ Error fetching SEC data:', error);
-            showToast('Error fetching SEC data', 'error');
+            console.error('❌ Error:', error);
+            showToast('Error fetching SEC data: ' + error.message, 'error');
         } finally {
             this.disabled = false;
             this.innerHTML = '📥 Fetch SEC Data';
+        }
+    });
+    
+    // Enrich data button
+    document.getElementById('enrichBtn').addEventListener('click', async function() {
+        this.disabled = true;
+        this.innerHTML = '<span class="spinner"></span> Enriching...';
+        
+        try {
+            const response = await fetch('/api/enrich-filings', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'}
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                showToast(data.message, 'success');
+                setTimeout(() => {
+                    loadFilings();
+                }, 2000);
+            } else {
+                throw new Error(data.error);
+            }
+        } catch (error) {
+            console.error('❌ Error:', error);
+            showToast('Error enriching data: ' + error.message, 'error');
+        } finally {
+            this.disabled = false;
+            this.innerHTML = '💰 Enrich Data';
         }
     });
     
@@ -155,7 +167,7 @@ function setupEventListeners() {
     
     // Filter listeners
     document.getElementById('dateFilter').addEventListener('change', applyFilters);
-    document.getElementById('statusFilter').addEventListener('change', applyFilters);
+    document.getElementById('dataFilter').addEventListener('change', applyFilters);
     document.getElementById('typeFilter').addEventListener('change', applyFilters);
     document.getElementById('searchFilter').addEventListener('input', applyFilters);
     
@@ -168,10 +180,10 @@ function setupEventListeners() {
     });
 }
 
-// Apply filters to the data
+// Apply filters
 function applyFilters() {
     const dateFilter = document.getElementById('dateFilter').value;
-    const statusFilter = document.getElementById('statusFilter').value;
+    const dataFilter = document.getElementById('dataFilter').value;
     const typeFilter = document.getElementById('typeFilter').value;
     const searchFilter = document.getElementById('searchFilter').value.toLowerCase();
     
@@ -200,8 +212,9 @@ function applyFilters() {
             }
         }
         
-        // Status filter
-        if (statusFilter !== 'all' && filing.status !== statusFilter) return false;
+        // Data filter
+        if (dataFilter === 'with' && !filing.revenue_latest) return false;
+        if (dataFilter === 'without' && filing.revenue_latest) return false;
         
         // Type filter
         if (typeFilter !== 'all' && filing.filing_type !== typeFilter) return false;
@@ -216,56 +229,61 @@ function applyFilters() {
     updateFilteredCount();
 }
 
-// Render the filings table
+// Render table
 function renderTable() {
     const tbody = document.getElementById('filingsTableBody');
     
     if (filteredFilings.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="9" class="loading">No filings found</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="loading">No filings found</td></tr>';
         return;
     }
     
     tbody.innerHTML = filteredFilings.map(filing => {
-        const priceRange = (filing.price_range_low && filing.price_range_high) 
-            ? `$${filing.price_range_low}-$${filing.price_range_high}`
-            : filing.final_price ? `$${filing.final_price}` : '-';
-            
-        const amount = filing.amount_to_raise 
-            ? `$${formatNumber(filing.amount_to_raise)}`
+        const revenue = filing.revenue_latest
+            ? `$${formatNumber(filing.revenue_latest)}`
+            : '-';
+        
+        const profit = filing.profit_latest
+            ? filing.profit_latest > 0 
+                ? `$${formatNumber(filing.profit_latest)}`
+                : `-$${formatNumber(Math.abs(filing.profit_latest))}`
+            : '-';
+        
+        const employees = filing.employees_count
+            ? formatNumber(filing.employees_count)
+            : '-';
+        
+        const shares = filing.shares_outstanding
+            ? formatNumber(filing.shares_outstanding)
             : '-';
             
         return `
             <tr>
                 <td>${formatDate(filing.filing_date)}</td>
-                <td><strong>${filing.company_name}</strong></td>
-                <td>${filing.ticker || '-'}</td>
-                <td>${filing.industry || '-'}</td>
+                <td>
+                    <strong>${filing.company_name}</strong>
+                    ${filing.ticker ? `<br><small>Ticker: ${filing.ticker}</small>` : ''}
+                </td>
                 <td>${filing.filing_type}</td>
-                <td><span class="status-badge status-${filing.status.toLowerCase()}">${filing.status}</span></td>
-                <td>${priceRange}</td>
-                <td>${amount}</td>
-                <td><a href="${filing.sec_url}" target="_blank" class="action-link">View Filing</a></td>
+                <td>${revenue}</td>
+                <td>${profit}</td>
+                <td>${employees}</td>
+                <td>${shares}</td>
+                <td><a href="${filing.sec_url}" target="_blank" class="action-link">View SEC</a></td>
             </tr>
         `;
     }).join('');
 }
 
-// Sort table by field
+// Sort table
 function sortTable(field) {
     filteredFilings.sort((a, b) => {
         let aVal = a[field];
         let bVal = b[field];
         
-        // Handle dates
         if (field === 'filing_date') {
             aVal = new Date(aVal);
             bVal = new Date(bVal);
-        }
-        
-        // Handle numbers
-        if (field === 'amount_to_raise') {
-            aVal = parseFloat(aVal) || 0;
-            bVal = parseFloat(bVal) || 0;
         }
         
         if (aVal < bVal) return -1;
@@ -278,10 +296,8 @@ function sortTable(field) {
 
 // Update statistics
 function updateStatistics() {
-    // Total count
     document.getElementById('totalCount').textContent = allFilings.length;
     
-    // This month count
     const thisMonth = new Date().getMonth();
     const thisYear = new Date().getFullYear();
     const monthCount = allFilings.filter(f => {
@@ -290,17 +306,12 @@ function updateStatistics() {
     }).length;
     document.getElementById('monthCount').textContent = monthCount;
     
-    // Active count (Filed or Marketing)
-    const activeCount = allFilings.filter(f => 
-        f.status === 'Filed' || f.status === 'Marketing'
-    ).length;
-    document.getElementById('activeCount').textContent = activeCount;
+    const withData = allFilings.filter(f => f.revenue_latest !== null).length;
+    document.getElementById('withDataCount').textContent = withData;
     
-    // Completed count (Trading)
-    const completedCount = allFilings.filter(f => f.status === 'Trading').length;
-    document.getElementById('completedCount').textContent = completedCount;
+    const missingData = allFilings.length - withData;
+    document.getElementById('missingDataCount').textContent = missingData;
     
-    // Update total filings in status bar
     document.getElementById('totalFilings').textContent = `Total filings: ${allFilings.length}`;
 }
 
@@ -416,7 +427,6 @@ function updateLastUpdateTime() {
     document.getElementById('lastUpdate').textContent = `Last update: ${timeStr}`;
 }
 
-// Show toast notification
 function showToast(message, type = 'info') {
     const toast = document.getElementById('toast');
     toast.textContent = message;

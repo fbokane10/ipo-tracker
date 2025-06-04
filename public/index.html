@@ -16,6 +16,7 @@
             <div class="header-actions">
                 <button id="refreshBtn" class="btn btn-primary">🔄 Refresh Data</button>
                 <button id="fetchSecBtn" class="btn btn-secondary">📥 Fetch SEC Data</button>
+                <button id="enrichBtn" class="btn btn-secondary">💰 Enrich Data</button>
                 <button id="exportBtn" class="btn btn-success">📊 Export CSV</button>
             </div>
         </div>
@@ -43,14 +44,14 @@
                 <div class="stat-label">New Filings</div>
             </div>
             <div class="stat-card">
-                <h3>In Progress</h3>
-                <div class="stat-number" id="activeCount">0</div>
-                <div class="stat-label">Active IPOs</div>
+                <h3>With Financial Data</h3>
+                <div class="stat-number" id="withDataCount">0</div>
+                <div class="stat-label">Enriched</div>
             </div>
             <div class="stat-card">
-                <h3>Completed</h3>
-                <div class="stat-number" id="completedCount">0</div>
-                <div class="stat-label">Now Trading</div>
+                <h3>Missing Data</h3>
+                <div class="stat-number" id="missingDataCount">0</div>
+                <div class="stat-label">Need Enrichment</div>
             </div>
         </div>
 
@@ -81,13 +82,11 @@
                     </select>
                 </div>
                 <div class="filter-group">
-                    <label for="statusFilter">Status:</label>
-                    <select id="statusFilter">
-                        <option value="all">All Statuses</option>
-                        <option value="Filed">Filed</option>
-                        <option value="Marketing">Marketing</option>
-                        <option value="Priced">Priced</option>
-                        <option value="Trading">Trading</option>
+                    <label for="dataFilter">Data Status:</label>
+                    <select id="dataFilter">
+                        <option value="all">All</option>
+                        <option value="with">With Financial Data</option>
+                        <option value="without">Missing Data</option>
                     </select>
                 </div>
                 <div class="filter-group">
@@ -96,7 +95,6 @@
                         <option value="all">All Types</option>
                         <option value="S-1">S-1 (US Companies)</option>
                         <option value="F-1">F-1 (Foreign)</option>
-                        <option value="424B4">424B4 (Pricing)</option>
                     </select>
                 </div>
                 <div class="filter-group">
@@ -115,18 +113,17 @@
                         <tr>
                             <th class="sortable" data-sort="filing_date">Date ↕</th>
                             <th class="sortable" data-sort="company_name">Company ↕</th>
-                            <th>Ticker</th>
-                            <th>Industry</th>
                             <th>Type</th>
-                            <th class="sortable" data-sort="status">Status ↕</th>
-                            <th>Price Range</th>
-                            <th class="sortable" data-sort="amount_to_raise">Amount ↕</th>
+                            <th>Revenue</th>
+                            <th>Net Income</th>
+                            <th>Employees</th>
+                            <th>Shares</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="filingsTableBody">
                         <tr>
-                            <td colspan="9" class="loading">Loading data...</td>
+                            <td colspan="8" class="loading">Loading data...</td>
                         </tr>
                     </tbody>
                 </table>
@@ -137,7 +134,7 @@
     <!-- Footer -->
     <footer>
         <div class="container">
-            <p>IPO Tracker - Real-time SEC EDGAR Data | Auto-updates every hour</p>
+            <p>IPO Tracker - Real-time SEC EDGAR Data</p>
         </div>
     </footer>
 

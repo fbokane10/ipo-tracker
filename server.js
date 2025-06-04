@@ -1,25 +1,22 @@
 // ===================================
-// IPO TRACKER SERVER
-// This is the main server file that runs everything
+// IPO TRACKER SERVER - FIXED VERSION
 // ===================================
 
-// PART 1: LOAD CONFIGURATION
 require('dotenv').config();
 
-// PART 2: IMPORT ALL REQUIRED PACKAGES
-const express = require('express');        // Web server framework
-const http = require('http');             // HTTP server
-const socketIo = require('socket.io');    // Real-time updates
-const cors = require('cors');             // Allow browser connections
-const path = require('path');             // File path utilities
-const { Pool } = require('pg');           // PostgreSQL client
-const cron = require('node-cron');        // Task scheduler
+const express = require('express');
+const http = require('http');
+const socketIo = require('socket.io');
+const cors = require('cors');
+const path = require('path');
+const { Pool } = require('pg');
+const cron = require('node-cron');
+const axios = require('axios');
 
-// PART 3: CREATE EXPRESS APP
 const app = express();
 console.log('🚀 Starting IPO Tracker server...');
 
-// PART 4: CREATE DATABASE CONNECTION
+// Database connection
 const pool = new Pool({
     host: process.env.DB_HOST,
     port: process.env.DB_PORT,
@@ -28,7 +25,6 @@ const pool = new Pool({
     password: process.env.DB_PASSWORD
 });
 
-// Test database connection
 pool.query('SELECT NOW()', (err, res) => {
     if (err) {
         console.error('❌ Database connection failed:', err.message);
@@ -37,14 +33,14 @@ pool.query('SELECT NOW()', (err, res) => {
     }
 });
 
-// PART 5: MIDDLEWARE SETUP
-app.use(cors());                          // Allow cross-origin requests
-app.use(express.json());                  // Parse JSON bodies
-app.use(express.static('public'));        // Serve static files
+// Middleware
+app.use(cors());
+app.use(express.json());
+app.use(express.static('public'));
 
-// PART 6: API ROUTES
+// API ROUTES
 
-// Route 1: Get all IPO filings
+// Get all filings
 app.get('/api/filings', async (req, res) => {
     console.log('📡 GET /api/filings');
     
@@ -52,12 +48,12 @@ app.get('/api/filings', async (req, res) => {
         const query = `
             SELECT 
                 id, company_name, ticker, industry, filing_type,
-                filing_date, status, price_range_low, price_range_high,
-                final_price, shares_offered, amount_to_raise,
-                revenue_latest, profit_latest, sec_url
+                filing_date, status, revenue_latest, profit_latest, 
+                sec_url, shares_outstanding, employees_count
             FROM ipo_filings
+            WHERE filing_type IN ('S-1', 'F-1')
             ORDER BY filing_date DESC
-            LIMIT 100
+            LIMIT 200
         `;
         
         const result = await pool.query(query);
@@ -77,29 +73,28 @@ app.get('/api/filings', async (req, res) => {
     }
 });
 
-// Route 2: Get statistics
+// Get statistics
 app.get('/api/stats', async (req, res) => {
     console.log('📡 GET /api/stats');
     
     try {
-        // Monthly filing counts
         const monthlyQuery = `
             SELECT 
                 TO_CHAR(filing_date, 'YYYY-MM') as month,
                 COUNT(*) as count
             FROM ipo_filings
             WHERE filing_date >= CURRENT_DATE - INTERVAL '12 months'
+            AND filing_type IN ('S-1', 'F-1')
             GROUP BY TO_CHAR(filing_date, 'YYYY-MM')
             ORDER BY month
         `;
         
-        // Industry breakdown
         const industryQuery = `
             SELECT 
                 COALESCE(industry, 'Unknown') as industry,
                 COUNT(*) as count
             FROM ipo_filings
-            WHERE filing_date >= CURRENT_DATE - INTERVAL '12 months'
+            WHERE filing_type IN ('S-1', 'F-1')
             GROUP BY industry
             ORDER BY count DESC
             LIMIT 10
@@ -126,26 +121,7 @@ app.get('/api/stats', async (req, res) => {
     }
 });
 
-// Route 3: Health check
-app.get('/api/health', (req, res) => {
-    res.json({
-        status: 'healthy',
-        timestamp: new Date(),
-        uptime: process.uptime(),
-        environment: process.env.NODE_ENV || 'development'
-    });
-});
-
-// Route 4: Test route
-app.get('/test', (req, res) => {
-    console.log('Someone visited /test');
-    res.json({
-        message: 'Server is working!',
-        timestamp: new Date()
-    });
-});
-
-// Route 5: Manual SEC data fetch
+// Manual SEC fetch
 app.post('/api/fetch-sec-data', async (req, res) => {
     console.log('📡 POST /api/fetch-sec-data - Manual trigger');
     
@@ -167,18 +143,105 @@ app.post('/api/fetch-sec-data', async (req, res) => {
     }
 });
 
-// Route 6: Test SEC connection
-app.get('/api/test-sec', async (req, res) => {
-    console.log('📡 GET /api/test-sec');
+// Enrich with SEC data
+app.post('/api/enrich-filings', async (req, res) => {
+    console.log('📡 POST /api/enrich-filings - Getting real SEC data');
     
     try {
-        const { testSECConnection } = require('./scrapers/sec-edgar');
-        const isConnected = await testSECConnection();
+        const filings = await pool.query(
+            `SELECT id, cik, company_name 
+             FROM ipo_filings 
+             WHERE filing_type IN ('S-1', 'F-1')
+             AND (revenue_latest IS NULL OR employees_count IS NULL)
+             LIMIT 20`
+        );
+        
+        let enrichedCount = 0;
+        
+        for (const filing of filings.rows) {
+            try {
+                const cikPadded = String(filing.cik).padStart(10, '0');
+                const url = `https://data.sec.gov/api/xbrl/companyfacts/CIK${cikPadded}.json`;
+                
+                console.log(`   🏢 Fetching data for ${filing.company_name}...`);
+                
+                const response = await axios.get(url, {
+                    headers: {
+                        'User-Agent': process.env.SEC_USER_AGENT || 'IPO-Tracker contact@example.com',
+                        'Accept': 'application/json'
+                    },
+                    timeout: 10000
+                });
+                
+                const data = response.data;
+                let revenue = null;
+                let netIncome = null;
+                let employees = null;
+                
+                // Extract revenue
+                if (data.facts && data.facts['us-gaap']) {
+                    const revenueFields = ['Revenues', 'RevenueFromContractWithCustomerExcludingAssessedTax', 'SalesRevenueNet'];
+                    for (const field of revenueFields) {
+                        if (data.facts['us-gaap'][field]) {
+                            const revData = data.facts['us-gaap'][field]['units']['USD'];
+                            if (revData && revData.length > 0) {
+                                revenue = revData[revData.length - 1].val;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // Extract net income
+                    const incomeFields = ['NetIncomeLoss', 'ProfitLoss'];
+                    for (const field of incomeFields) {
+                        if (data.facts['us-gaap'][field]) {
+                            const incData = data.facts['us-gaap'][field]['units']['USD'];
+                            if (incData && incData.length > 0) {
+                                netIncome = incData[incData.length - 1].val;
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                // Extract employees
+                if (data.facts && data.facts['dei'] && data.facts['dei']['EntityNumberOfEmployees']) {
+                    const empData = data.facts['dei']['EntityNumberOfEmployees']['units']['pure'];
+                    if (empData && empData.length > 0) {
+                        employees = empData[empData.length - 1].val;
+                    }
+                }
+                
+                await pool.query(
+                    `UPDATE ipo_filings 
+                     SET revenue_latest = COALESCE($1, revenue_latest),
+                         profit_latest = COALESCE($2, profit_latest),
+                         employees_count = COALESCE($3, employees_count),
+                         last_updated = NOW()
+                     WHERE id = $4`,
+                    [revenue, netIncome, employees, filing.id]
+                );
+                
+                enrichedCount++;
+                console.log(`   ✅ Enriched ${filing.company_name}`);
+                
+            } catch (error) {
+                if (error.response && error.response.status === 404) {
+                    console.log(`   ℹ️ No data available for ${filing.company_name}`);
+                } else {
+                    console.log(`   ⚠️ Error enriching ${filing.company_name}: ${error.message}`);
+                }
+            }
+            
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
         
         res.json({
             success: true,
-            connected: isConnected
+            message: `Enriched ${enrichedCount} filings with SEC data`,
+            count: enrichedCount
         });
+        
     } catch (error) {
         console.error('❌ Error:', error);
         res.status(500).json({
@@ -188,47 +251,83 @@ app.get('/api/test-sec', async (req, res) => {
     }
 });
 
-// PART 6.5: SCHEDULED TASKS
-
-// Schedule automatic SEC data fetch every hour
-cron.schedule('0 * * * *', async () => {
-    console.log('\n⏰ Running scheduled SEC data fetch at', new Date().toLocaleString());
-    
+// Export CSV
+app.get('/api/export', async (req, res) => {
     try {
-        const { fetchSECData } = require('./scrapers/sec-edgar');
-        const newFilings = await fetchSECData(pool, io);
+        const query = `
+            SELECT 
+                company_name, ticker, filing_type, filing_date, 
+                status, revenue_latest, profit_latest, employees_count, 
+                shares_outstanding, sec_url
+            FROM ipo_filings
+            WHERE filing_type IN ('S-1', 'F-1')
+            ORDER BY filing_date DESC
+        `;
         
-        console.log(`✅ Scheduled fetch complete: ${newFilings} new filings\n`);
+        const result = await pool.query(query);
         
-        // Notify all connected clients
-        if (newFilings > 0) {
-            io.emit('scheduled-update', {
-                message: `Found ${newFilings} new filings`,
-                timestamp: new Date()
+        const headers = [
+            'Company Name', 'Ticker', 'Filing Type', 'Filing Date',
+            'Status', 'Revenue', 'Profit', 'Employees', 'Shares', 'SEC URL'
+        ];
+        
+        let csv = headers.join(',') + '\n';
+        
+        result.rows.forEach(row => {
+            const values = [
+                row.company_name,
+                row.ticker || '',
+                row.filing_type,
+                row.filing_date,
+                row.status,
+                row.revenue_latest || '',
+                row.profit_latest || '',
+                row.employees_count || '',
+                row.shares_outstanding || '',
+                row.sec_url
+            ];
+            
+            const escapedValues = values.map(val => {
+                const str = String(val);
+                if (str.includes(',') || str.includes('"')) {
+                    return `"${str.replace(/"/g, '""')}"`;
+                }
+                return str;
             });
-        }
+            
+            csv += escapedValues.join(',') + '\n';
+        });
+        
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', 'attachment; filename=ipo_filings.csv');
+        res.send(csv);
     } catch (error) {
-        console.error('❌ Scheduled fetch error:', error.message);
+        console.error('❌ Error exporting:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
     }
 });
 
-console.log('⏰ Scheduled tasks set up - will fetch SEC data every hour at :00');
+// Health check
+app.get('/api/health', (req, res) => {
+    res.json({
+        status: 'healthy',
+        timestamp: new Date()
+    });
+});
 
-// Also run a fetch on server startup (after 5 seconds)
-setTimeout(async () => {
-    console.log('\n🚀 Running initial SEC data fetch...');
-    try {
-        const { fetchSECData } = require('./scrapers/sec-edgar');
-        const newFilings = await fetchSECData(pool, io);
-        console.log(`✅ Initial fetch complete: ${newFilings} new filings\n`);
-    } catch (error) {
-        console.error('❌ Initial fetch error:', error.message);
-    }
-}, 5000);
+// Test route
+app.get('/test', (req, res) => {
+    res.json({
+        message: 'Server is working!',
+        timestamp: new Date()
+    });
+});
 
-// PART 7: CREATE HTTP SERVER WITH SOCKET.IO
+// Create HTTP server with Socket.io
 const server = http.createServer(app);
-
 const io = socketIo(server, {
     cors: {
         origin: "*",
@@ -236,7 +335,6 @@ const io = socketIo(server, {
     }
 });
 
-// Handle socket connections
 io.on('connection', (socket) => {
     console.log('🔌 New client connected:', socket.id);
     
@@ -245,22 +343,14 @@ io.on('connection', (socket) => {
     });
 });
 
-// PART 8: START THE SERVER
+// Start server
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log('\n========================================');
     console.log('✅ IPO Tracker Server is running!');
     console.log('========================================');
     console.log(`📍 Local URL: http://localhost:${PORT}`);
-    console.log(`🧪 Test endpoint: http://localhost:${PORT}/test`);
-    console.log(`📊 API endpoints:`);
-    console.log(`   - GET /api/filings (get all filings)`);
-    console.log(`   - GET /api/stats (get statistics)`);
-    console.log(`   - GET /api/health (health check)`);
-    console.log(`   - POST /api/fetch-sec-data (fetch SEC data)`);
-console.log(`   - GET /api/test-sec (test SEC connection)`);
     console.log('========================================\n');
 });
 
-// PART 9: EXPORT FOR OTHER FILES
 module.exports = { app, pool, io };
